@@ -1,15 +1,22 @@
-// js/app.js — Go-Back-N ARQ (true sliding window), textbook visuals, conditional controls, and replay
-// Modes: Textbook 2D (diagonal draw+move), Vertical columns (horizontal draw+move), Animated replay (summary)
-// UI: dark selects/inputs (always visible), conditional "specific/k" & delay fields
-// Timing: gentle/cinematic; real GBN: pipeline up to N, timeout → retransmit base..nextSeq-1
+// js/app.js — Go-Back-N ARQ Visual Simulator (Light Theme, Final)
+// Features:
+// • TRUE Go-Back-N: window N, pipelined sends, timeout → retransmit base..nextSeq-1
+// • ACK only after frame ARRIVES (never earlier)
+// • ~5s pacing: 2.0s down, 0.6s process, 2.0s up (plus user delay)
+// • 3 modes: Textbook 2D (diagonal draw+move), Vertical columns (horizontal draw+move), Replay (summary only)
+// • Strict conditional UI: extra fields only visible when selected in dropdowns
+// • Inputs always readable in light theme (no hover opacity weirdness)
+// • Summary with optional animated diagram
+// • Guide credit: Dr. Swaminathan Annadurai
 
 (function () {
   // ---------- Build UI ----------
   const app = document.getElementById("app");
   app.innerHTML = `
-    <header class="glass">
-      <h1>Go-Back-N ARQ — Visual Simulator</h1>
-      <p>Sliding window up to N, pipelined frames, timeout → retransmit from base. Choose your visual mode and run.</p>
+    <header class="glass" style="background:rgba(255,255,255,0.65);border-color:rgba(0,0,0,0.08);">
+      <h1 style="color:#0b1e2b;margin-bottom:2px">Go-Back-N ARQ — Visual Simulator</h1>
+      <p style="color:#334b5b;margin-bottom:6px">Sliding window up to N, pipelined frames, timeout → retransmit from base.</p>
+      <p style="color:#0b1e2b;font-weight:700;margin-bottom:8px">Guide: Dr. Swaminathan Annadurai</p>
 
       <div class="controls">
         <label>Number of frames
@@ -91,32 +98,32 @@
       </div>
     </header>
 
-    <section class="glass sim-area">
+    <section class="glass sim-area" style="background:rgba(255,255,255,0.55);border-color:rgba(0,0,0,0.08);">
       <div class="lane">
-        <h3>Sender</h3>
+        <h3 style="color:#0b1e2b">Sender</h3>
         <div id="senderWindow" class="window"></div>
         <div id="senderQueue" class="queue"></div>
       </div>
 
-      <div class="channel glass">
+      <div class="channel glass" style="background:rgba(255,255,255,0.65);border-color:rgba(0,0,0,0.08);">
         <div id="channelStage" style="position:relative;width:100%;height:480px;">
           <svg id="liveSvg" width="100%" height="100%" style="position:absolute;inset:0;"></svg>
         </div>
       </div>
 
       <div class="lane">
-        <h3>Receiver</h3>
+        <h3 style="color:#0b1e2b">Receiver</h3>
         <div id="recvArea" class="recv"></div>
       </div>
     </section>
 
-    <section class="glass">
-      <h3 style="text-align:center;color:#00ffff;margin-bottom:6px">Event Log</h3>
-      <div id="events" class="log"></div>
+    <section class="glass" style="background:rgba(255,255,255,0.55);border-color:rgba(0,0,0,0.08);">
+      <h3 style="text-align:center;color:#0b1e2b;margin-bottom:6px">Event Log</h3>
+      <div id="events" class="log" style="color:#324a59;"></div>
     </section>
 
-    <section class="glass hidden" id="statsWrap">
-      <h3 style="text-align:center;color:#00ffff;margin-bottom:8px">📊 Simulation Results</h3>
+    <section class="glass hidden" id="statsWrap" style="background:rgba(255,255,255,0.65);border-color:rgba(0,0,0,0.08);">
+      <h3 style="text-align:center;color:#0b1e2b;margin-bottom:8px">📊 Simulation Results</h3>
       <div class="stats">
         <div class="stat-card"><div class="stat-label">Total original frames</div><div class="stat-value" id="stat_totalFrames">0</div></div>
         <div class="stat-card"><div class="stat-label">Total transmissions</div><div class="stat-value" id="stat_totalTrans">0</div></div>
@@ -133,19 +140,19 @@
       </div>
 
       <div style="margin-top:12px">
-        <h4 style="color:#a9c2d6;margin-bottom:6px">Flow Diagram (<span id="diagramModeLabel">Vertical two-columns</span>)</h4>
-        <div id="diagramHost" class="glass" style="padding:10px"></div>
+        <h4 style="color:#3e5566;margin-bottom:6px">Flow Diagram (<span id="diagramModeLabel">Vertical two-columns</span>)</h4>
+        <div id="diagramHost" class="glass" style="padding:10px;background:rgba(255,255,255,0.55);border-color:rgba(0,0,0,0.08);"></div>
       </div>
     </section>
 
-    <footer>CN Project • Go-Back-N • proper sliding window + cinematic lines ✨</footer>
+    <footer style="text-align:center;color:#3e5566">CN Project • Go-Back-N • Light, clean, and accurate ✨</footer>
   `;
 
-  // ---------- Make controls readable (dark bg + white text, always visible) ----------
+  // ---------- Inputs always readable (light theme, no hover-opacity) ----------
   for (const el of document.querySelectorAll(".controls input, .controls select")) {
-    el.style.background = "#0f172a";
-    el.style.color = "#ffffff";
-    el.style.border = "1px solid rgba(255,255,255,0.25)";
+    el.style.background = "rgba(255,255,255,0.95)";
+    el.style.color = "#0b1e2b";
+    el.style.border = "1px solid rgba(0,0,0,0.2)";
     el.style.opacity = "1";
   }
 
@@ -166,22 +173,22 @@
   const channelStage = $("#channelStage"), liveSvg = $("#liveSvg"), events = $("#events");
   const statsWrap = $("#statsWrap"), diagramHost = $("#diagramHost");
 
-  // ---------- Conditional UI visibility (this is the strict behavior you asked for) ----------
-  const updateLossUI = () => {
+  // ---------- STRICT Conditional UI ----------
+  function updateLossUI() {
     const v = lossModeEl.value;
     labelSpecific.classList.toggle("hidden", v !== "specific");
     labelEveryK.classList.toggle("hidden", v !== "everyk");
-  };
-  const updateDelayUI = () => {
-    const on = frameDelayModeEl.value !== "none";
+  }
+  function updateDelayUI() {
+    const v = frameDelayModeEl.value;
+    const on = v !== "none";
     labelDelaySpec.classList.toggle("hidden", !on);
     labelDelayMs.classList.toggle("hidden", !on);
-  };
-  const updateDiagramLabel = () => {
+  }
+  function updateDiagramLabel() {
     const map = { vertical: "Vertical two-columns", textbook: "Textbook diagonals", animated: "Animated replay" };
     diagramModeLabel.textContent = map[diagramTypeEl.value] || "Vertical two-columns";
-  };
-
+  }
   lossPercentEl.addEventListener("input", ()=> lossPercentVal.textContent = lossPercentEl.value + "%");
   ackLossPercentEl.addEventListener("input", ()=> ackLossVal.textContent = ackLossPercentEl.value + "%");
   lossModeEl.addEventListener("change", updateLossUI);
@@ -193,16 +200,15 @@
   let base, nextSeq, seqLimit;         // GBN indices
   let running=false, paused=false, timer=null;
 
-  // bookkeeping for frames in flight
-  // record[seq] = { sentCount, delivered(false/true), acked(false/true) }
-  const record = new Map();
+  // track frames
+  const record = new Map(); // seq -> { sentCount, delivered, acked }
 
   const stats = {
     totalFrames: 0, totalTrans: 0, totalAcks: 0,
     framesLost: 0, acksLost: 0, framesDelayed: 0,
     framesDelivered: 0
   };
-  const diagram = { frames: [], acks: [] }; // summary only
+  const diagram = { frames: [], acks: [] }; // for summary
 
   function init(){
     N = clamp(parseInt(winSizeEl.value,10)||4, 1, 32);
@@ -256,7 +262,7 @@
     return false;
   };
 
-  // ---------- Geometry for live sim modes ----------
+  // ---------- Live geometry for sim modes ----------
   function endpoints(seq){
     const W = channelStage.clientWidth, leftX = 22, rightX = Math.max(140, W - 22 - 96);
     const baseY = 90 + (seq % 6) * 58;
@@ -269,7 +275,7 @@
         ackEnd:     {x:leftX,  y:baseY-14},
       };
     }
-    // textbook
+    // textbook (slight diagonal)
     return {
       frameStart: {x:leftX,  y:baseY},
       frameEnd:   {x:rightX, y:baseY+16},
@@ -278,7 +284,7 @@
     };
   }
 
-  // SVG line-by-line draw + moving packet
+  // SVG animated draw + moving packet
   function drawLineAnimated(svg, x1,y1,x2,y2, color, dashed, durMs){
     const ln = document.createElementNS("http://www.w3.org/2000/svg","line");
     ln.setAttribute("x1",x1); ln.setAttribute("y1",y1);
@@ -294,7 +300,7 @@
     ln.style.transition = `stroke-dashoffset ${durMs}ms ease`;
     requestAnimationFrame(()=> ln.setAttribute("stroke-dashoffset","0"));
     return ln;
-    }
+  }
   function mkPacket(text, cls, pos){
     const p=document.createElement("div");
     p.className=cls; p.textContent=text;
@@ -318,9 +324,9 @@
   const ease = k => k<0.5 ? 2*k*k : -1 + (4-2*k)*k;
 
   // ---------- Go-Back-N engine ----------
-  const DOWN_MS = 2000;  // forward leg
+  const DOWN_MS = 2000;  // forward travel
   const PROC_MS = 600;   // receiver processing
-  const ACK_MS  = 2000;  // ack leg
+  const ACK_MS  = 2000;  // ack travel
 
   function startTimer(){ clearTimer(); timer = setTimeout(onTimeout, timeout); }
   function clearTimer(){ if(timer){ clearTimeout(timer); timer=null; } }
@@ -328,22 +334,19 @@
   function onTimeout(){
     if(!running) return;
     if(base < nextSeq){
-      log(`Timeout at base ${base} — retransmit ${base}..${Math.min(nextSeq-1, seqLimit-1)} (Go-Back-N).`);
-      // retransmit all outstanding (base..nextSeq-1)
+      log(`Timeout at base ${base} — retransmit ${base}..${Math.min(nextSeq-1, seqLimit-1)} (GBN).`);
       for(let s=base; s<nextSeq; s++){
         retransmitFrame(s);
       }
-      startTimer(); // restart timer after batch
+      startTimer();
     }
   }
 
-  // Send new frames while window has space
   async function pumpWindow(){
     while(running && !paused && nextSeq < base + N && nextSeq < seqLimit){
       await sendFrame(nextSeq);
       nextSeq++;
       refreshWindow();
-      // start timer when the first unacked is sent
       if(base === nextSeq-1) startTimer();
     }
   }
@@ -359,51 +362,51 @@
     }
   }
 
+  // ---- STRICT ACK-after-arrival: handled inside receiverHandle only ----
   async function sendFrame(seq){
-    // record
     const rec = record.get(seq) || { sentCount:0, delivered:false, acked:false };
     rec.sentCount++; record.set(seq, rec);
+    stats.totalTrans++;
 
-    // queue badge
     const badge = document.createElement("div");
     badge.className="packet"; badge.style.position="static"; badge.textContent=`F${seq}`;
     senderQueue.appendChild(badge);
-    stats.totalTrans++;
 
     const { frameStart, frameEnd } = endpoints(seq);
     const delayed = shouldDelayFrame(seq);
     const extraDelay = delayed ? Math.max(0, parseInt(frameDelayMsEl.value,10)||0) : 0;
-    if(delayed){ stats.framesDelayed++; }
+    if(delayed) stats.framesDelayed++;
 
-    const lose = shouldLoseFrame(seq);
-    const lineColor = lose ? "#ff6b6b" : "#00ffff";
-    drawLineAnimated(liveSvg, frameStart.x, frameStart.y, frameEnd.x, frameEnd.y, lineColor, lose, DOWN_MS + extraDelay);
+    const willLose = shouldLoseFrame(seq);
+    const color = willLose ? "#ff6b6b" : "#00a3ad"; // pastel cyan on light
+
+    drawLineAnimated(liveSvg, frameStart.x, frameStart.y, frameEnd.x, frameEnd.y,
+                     color, willLose, DOWN_MS + extraDelay);
 
     const pkt = mkPacket(`F${seq}`,"packet", frameStart);
     if(delayed) pkt.classList.add("delayed");
     await animateMove(pkt, frameStart, frameEnd, DOWN_MS + extraDelay);
 
-    if(lose){
+    if(willLose){
       pkt.classList.add("lost");
       log(`Frame ${seq} lost in channel.`);
       stats.framesLost++;
       diagram.frames.push({seq, delivered:false});
-      await sleep(400);
+      await sleep(300);
       pkt.remove();
-      // do not ACK; wait for timeout globally
+      // wait for timeout to trigger RTX
       return;
     }
 
-    // receiver gets it
+    // delivered
     pkt.remove();
     diagram.frames.push({seq, delivered:true});
     rec.delivered = true;
 
     await sleep(PROC_MS);
-    receiverHandle(seq);
+    await receiverHandle(seq); // ACK starts only here
   }
 
-  // Retransmit already-sent outstanding frame
   async function retransmitFrame(seq){
     if(!running) return;
     const rec = record.get(seq) || { sentCount:0, delivered:false, acked:false };
@@ -411,14 +414,14 @@
     stats.totalTrans++;
 
     const { frameStart, frameEnd } = endpoints(seq);
-    const lose = shouldLoseFrame(seq); // re-apply rule on retransmit
-    const lineColor = lose ? "#ff6b6b" : "#00ffff";
-    drawLineAnimated(liveSvg, frameStart.x, frameStart.y, frameEnd.x, frameEnd.y, lineColor, lose, DOWN_MS);
+    const willLose = shouldLoseFrame(seq);
+    drawLineAnimated(liveSvg, frameStart.x, frameStart.y, frameEnd.x, frameEnd.y,
+                     willLose ? "#ff6b6b" : "#00a3ad", willLose, DOWN_MS);
 
     const pkt = mkPacket(`F${seq}`,"packet", frameStart);
     await animateMove(pkt, frameStart, frameEnd, DOWN_MS);
 
-    if(lose){
+    if(willLose){
       pkt.classList.add("lost");
       log(`(RTX) Frame ${seq} lost again.`);
       stats.framesLost++;
@@ -431,43 +434,43 @@
     pkt.remove();
     diagram.frames.push({seq, delivered:true});
     await sleep(PROC_MS);
-    receiverHandle(seq);
+    await receiverHandle(seq);
   }
 
-  // Receiver logic (GBN cumulative ACK)
   async function receiverHandle(seq){
     const expected = recvArea.childElementCount;
     const { ackStart, ackEnd } = endpoints(seq);
 
     let ackNum;
     if(seq === expected){
-      // in-order
       const blk = document.createElement("div"); blk.className="frame active"; blk.textContent=`#${seq}`;
+      blk.style.background = "rgba(0,0,0,0.04)";
       recvArea.appendChild(blk);
       stats.framesDelivered++;
       ackNum = seq;
       log(`Receiver accepted ${seq} → ACK ${ackNum}`);
     } else {
-      // out-of-order → cumulative ACK for last in-order
       ackNum = expected - 1;
       log(`Receiver discarded ${seq} (expected ${expected}) → ACK ${ackNum}`);
     }
 
-    // send ACK (with loss/ack-delay)
+    // ACK ONLY NOW (post-arrival)
     stats.totalAcks++;
     const ackLose = Math.random() < ackLossProb;
-    drawLineAnimated(liveSvg, ackStart.x, ackStart.y, ackEnd.x, ackEnd.y, "#4faaff", ackLose, ACK_MS + (parseInt(ackDelayMsEl.value,10)||0));
+
+    drawLineAnimated(liveSvg, ackStart.x, ackStart.y, ackEnd.x, ackEnd.y,
+                     "#2a6bff", ackLose, ACK_MS + (parseInt(ackDelayMsEl.value,10)||0));
+
     const ackPkt = mkPacket(`ACK${ackNum}`,"packet ack", ackStart);
     await animateMove(ackPkt, ackStart, ackEnd, ACK_MS + (parseInt(ackDelayMsEl.value,10)||0));
 
     if(ackLose){
       ackPkt.classList.add("lost");
-      log(`ACK ${ackNum} lost on return path.`);
+      log(`ACK ${ackNum} lost — sender will timeout.`);
       stats.acksLost++;
       diagram.acks.push({seq:ackNum, delivered:false});
       await sleep(300);
       ackPkt.remove();
-      // sender won't slide; timeout will cause RTX
       return;
     }
 
@@ -476,26 +479,22 @@
     onAck(ackNum);
   }
 
-  // Sender handles cumulative ACK
   function onAck(ackNum){
-    log(`Sender received ACK ${ackNum} (cumulative).`);
+    log(`Sender received cumulative ACK ${ackNum}.`);
     if(ackNum >= base){
       base = ackNum + 1;
       refreshWindow();
-      if(base === nextSeq){
-        // all acked → stop timer
+      if(base === nextSeq) {
         clearTimer();
       } else {
-        // still outstanding → restart timer
         startTimer();
       }
-      // Pipeline more frames if available
       pumpWindow();
-      // done?
       if(base >= seqLimit) finish();
     }
   }
 
+  // ---------- Summary & Diagram ----------
   function finish(){
     running=false; clearTimer(); log("Simulation complete — building summary…");
     const delivered = stats.framesDelivered;
@@ -513,62 +512,63 @@
     setTxt("#stat_lossPercent", loss.toFixed(2) + "%");
     $("#eff_fill").style.width = `${Math.max(0,Math.min(100,eff))}%`;
 
-    // summary diagram
     diagramHost.innerHTML="";
-    const mode = diagramTypeEl.value;
+    const mode = diagramTypeEl.value; // vertical | textbook | animated
     const lbl = { vertical:"Vertical two-columns", textbook:"Textbook diagonals", animated:"Animated replay" }[mode] || "Vertical two-columns";
     diagramModeLabel.textContent = lbl;
     renderDiagram(diagramHost, diagram, stats.totalFrames, mode);
 
     statsWrap.classList.remove("hidden");
   }
+  const setTxt = (sel, txt) => { const n=document.querySelector(sel); if(n) n.textContent=txt; };
 
-  // ---------- Summary diagram renderers ----------
   function renderDiagram(host, diag, framesCount, mode){
     if(mode==="vertical" || mode==="animated") return renderVertical(host, diag, framesCount, mode==="animated");
     return renderTextbook(host, diag, framesCount, mode==="animated");
   }
 
+  // Summary: Vertical
   function renderVertical(host, diag, rows, animated){
     const w = host.clientWidth || 900, rowGap = 60;
     const h = Math.max(220, rows*rowGap + 60);
     const padX = 110, colL = padX, colR = w - padX;
     const svg = svgEl(w,h);
 
-    svg.appendChild(vline(colL,30,h-30,"#00ffff"));
-    svg.appendChild(vline(colR,30,h-30,"#4faaff"));
-    svg.appendChild(label(colL-25,20,"Sender"));
-    svg.appendChild(label(colR-35,20,"Receiver"));
+    svg.appendChild(vline(colL,30,h-30,"#0b1e2b"));
+    svg.appendChild(vline(colR,30,h-30,"#0b1e2b"));
+    svg.appendChild(label(colL-25,20,"Sender","#0b1e2b"));
+    svg.appendChild(label(colR-35,20,"Receiver","#0b1e2b"));
 
     for(let i=0;i<rows;i++){
       const y = 40 + i*rowGap;
-      svg.appendChild(node(colL,y,`#${i}`));
-      svg.appendChild(node(colR,y,`#${i}`));
+      svg.appendChild(nodeCircle(colL,y,`#${i}`));
+      svg.appendChild(nodeCircle(colR,y,`#${i}`));
     }
 
     let idx=0;
     diag.frames.forEach(f=>{
       const y = 40 + f.seq*rowGap;
-      const ln = hline(colL,y,colR,y,f.delivered?"#00ffff":"#ff6b6b",f.delivered?0:1);
+      const ln = hline(colL,y,colR,y,f.delivered?"#00a3ad":"#ff6b6b",f.delivered?0:1);
       if(animated) dash(ln, idx++); svg.appendChild(ln);
     });
     diag.acks.forEach(a=>{
       const y = 40 + Math.max(0,a.seq)*rowGap - 12;
-      const ln = hline(colR,y,colL,y,"#4faaff",a.delivered?0:1);
+      const ln = hline(colR,y,colL,y,"#2a6bff",a.delivered?0:1);
       if(animated) dash(ln, idx++); svg.appendChild(ln);
     });
 
     host.appendChild(svg);
   }
 
+  // Summary: Textbook diagonals
   function renderTextbook(host, diag, rows, animated){
     const w = host.clientWidth || 900, rowGap = 60;
     const h = Math.max(220, rows*rowGap + 60);
     const pad = 90, colL = pad, colR = w - pad;
     const svg = svgEl(w,h);
 
-    svg.appendChild(label(colL-25,20,"Sender"));
-    svg.appendChild(label(colR-35,20,"Receiver"));
+    svg.appendChild(label(colL-25,20,"Sender","#0b1e2b"));
+    svg.appendChild(label(colR-35,20,"Receiver","#0b1e2b"));
 
     for(let i=0;i<rows;i++){
       const y = 40 + i*rowGap;
@@ -579,12 +579,12 @@
     let idx=0;
     diag.frames.forEach(f=>{
       const y = 40 + f.seq*rowGap;
-      const ln = seg(colL,y,colR,y+16,f.delivered?"#00ffff":"#ff6b6b",f.delivered?0:1);
+      const ln = seg(colL,y,colR,y+16,f.delivered?"#00a3ad":"#ff6b6b",f.delivered?0:1);
       if(animated) dash(ln, idx++); svg.appendChild(ln);
     });
     diag.acks.forEach(a=>{
       const y = 40 + Math.max(0,a.seq)*rowGap - 12;
-      const ln = seg(colR,y+16,colL,y,"#4faaff",a.delivered?0:1);
+      const ln = seg(colR,y+16,colL,y,"#2a6bff",a.delivered?0:1);
       if(animated) dash(ln, idx++); svg.appendChild(ln);
     });
 
@@ -596,9 +596,9 @@
   function vline(x,y1,y2,c){ const l=line(x,y1,x,y2,c,2); l.setAttribute("opacity",".6"); return l; }
   function hline(x1,y1,x2,y2,c,d){ const l=line(x1,y1,x2,y2,c,3); l.setAttribute("opacity",".95"); if(d) l.setAttribute("stroke-dasharray","10 7"); return l; }
   function seg(x1,y1,x2,y2,c,d){ const l=line(x1,y1,x2,y2,c,3); if(d) l.setAttribute("stroke-dasharray","10 7"); return l; }
-  function node(x,y,t){ const g=ns("g"); const c=cir(x,y,6); const tx=txt(x-26,y-10,"#eafaff",12,t); c.setAttribute("fill","rgba(255,255,255,0.08)"); c.setAttribute("stroke","rgba(255,255,255,0.25)"); g.appendChild(c); g.appendChild(tx); return g; }
-  function nodeRect(x,y,t){ const g=ns("g"); const r=rect(x-20,y-12,40,24,6); r.setAttribute("fill","rgba(255,255,255,0.08)"); r.setAttribute("stroke","rgba(255,255,255,0.25)"); const tx=txt(x-15,y+4,"#eafaff",12,t); g.appendChild(r); g.appendChild(tx); return g; }
-  function label(x,y,txtc){ return txt(x,y,"#00ffff",14,txtc,true); }
+  function nodeCircle(x,y,t){ const g=ns("g"); const c=cir(x,y,6); c.setAttribute("fill","rgba(0,0,0,0)"); c.setAttribute("stroke","rgba(0,0,0,0.35)"); const tx=txt(x-26,y-10,"#0b1e2b",12,t); g.appendChild(c); g.appendChild(tx); return g; }
+  function nodeRect(x,y,t){ const g=ns("g"); const r=rect(x-20,y-12,40,24,6); r.setAttribute("fill","rgba(0,0,0,0.05)"); r.setAttribute("stroke","rgba(0,0,0,0.2)"); const tx=txt(x-15,y+4,"#0b1e2b",12,t); g.appendChild(r); g.appendChild(tx); return g; }
+  function label(x,y,txtc,color){ return txt(x,y,color||"#0b1e2b",14,txtc,true); }
   function dash(l,i){ const len=Math.hypot(l.x2.baseVal.value-l.x1.baseVal.value,l.y2.baseVal.value-l.y1.baseVal.value); l.setAttribute("stroke-dasharray",`${len}`); l.setAttribute("stroke-dashoffset",`${len}`); l.style.animation=`drawline .9s ${i*0.12}s ease forwards`; l.parentNode.appendChild(styleOnce()); }
   function styleOnce(){ const st=ns("style"); st.textContent=`@keyframes drawline{to{stroke-dashoffset:0}}`; return st; }
   const ns = n=>document.createElementNS("http://www.w3.org/2000/svg", n);
@@ -616,15 +616,10 @@
     if(running) return;
     running = true; paused = false;
     log(`Started — Mode: ${simModeEl.value}`);
-    await pumpWindow(); // fill the initial window
+    await pumpWindow();
   });
-
-  pauseBtn.addEventListener("click", ()=>{
-    paused = true; log("Paused.");
-  });
-
+  pauseBtn.addEventListener("click", ()=>{ paused = true; log("Paused."); });
   stepBtn.addEventListener("click", async ()=>{
-    // Step sends exactly one frame if window allows (helpful for demos)
     if(running) return;
     running = true; paused = false;
     if(nextSeq < base + N && nextSeq < seqLimit){
@@ -635,7 +630,6 @@
     }
     running = false;
   });
-
   resetBtn.addEventListener("click", ()=>{ init(); log("Reset."); });
 
   // ---------- Boot ----------
