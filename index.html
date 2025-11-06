@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Go-Back-N Simulator — Epic Edition</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Go-Back-N ARQ — Interactive Simulator</h1>
+    <p class="sub">Sender ↔ Receiver — visualize windows, loss & retransmission</p>
+  </header>
+
+  <main>
+    <section id="controls">
+      <label>Window size (N): <input id="winSize" type="number" min="1" max="10" value="4"></label>
+      <label>Timeout (ms): <input id="timeout" type="number" min="100" value="1200"></label>
+      <label>Loss prob (%): <input id="loss" type="range" min="0" max="80" value="15"></label>
+      <span id="lossVal">15%</span>
+      <button id="startBtn">Start</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="stepBtn">Step</button>
+      <button id="resetBtn">Reset</button>
+    </section>
+
+    <section id="sim">
+      <div class="lane" id="sender">
+        <h3>Sender</h3>
+        <div class="window" id="senderWindow"></div>
+        <div class="queue" id="senderQueue"></div>
+      </div>
+
+      <div class="comm">
+        <div class="channel" id="channelVisual"></div>
+      </div>
+
+      <div class="lane" id="receiver">
+        <h3>Receiver</h3>
+        <div class="received" id="recvArea"></div>
+      </div>
+    </section>
+
+    <section id="log">
+      <h4>Events</h4>
+      <div id="events"></div>
+    </section>
+  </main>
+
+<script src="js/app.js"></script>
+</body>
+</html>
