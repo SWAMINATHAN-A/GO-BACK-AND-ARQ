@@ -358,11 +358,13 @@
   // --------- Timeout (GBN retransmit) ---------
   async function onTimeout(){
     if(!running) return;
+    clearTimer();
     if(base < nextSeq){
       log(`Timeout at base ${base} — retransmit ${base}..${Math.min(nextSeq-1,seqLimit-1)} (GBN).`);
       for(let s=base; s<nextSeq; s++) await retransmitFrame(s);
       startTimer();
     }
+   if (base >= seqLimit) finish( );
   }
 
   function refreshWindow(){
@@ -408,11 +410,19 @@
     if(lose){
       pkt.style.opacity=".4"; pkt.style.background="#ffd6d6";
       log(`Frame ${seq} lost in channel.`);
-      stats.framesLost++; diagram.frames.push({seq, delivered:false});
+      stats.framesLost++; 
+      if (!diagram.frames.some(f => f.seq === seq)) {
+ 	 diagram.frames.push({ seq, delivered: !lose });
+                 }
+
       await sleep(300); pkt.remove(); return;
     }
 
-    pkt.remove(); diagram.frames.push({seq, delivered:true}); rec.delivered = true;
+    pkt.remove(); 
+    if (!diagram.frames.some(f => f.seq === seq)) {
+  	diagram.frames.push({ seq, delivered: !lose });
+           }
+    rec.delivered = true;
     await sleep(PROC_MS);
     await receiverHandle(seq, geom); // ACK strictly after arrival
   }
@@ -433,11 +443,19 @@
     if(lose){
       pkt.style.opacity=".4"; pkt.style.background="#ffd6d6";
       log(`(RTX) Frame ${seq} lost again.`);
-      stats.framesLost++; diagram.frames.push({seq, delivered:false});
+      stats.framesLost++; 
+      if (!diagram.frames.some(f => f.seq === seq)) {
+  	diagram.frames.push({ seq, delivered: !lose });
+                 }
+
       await sleep(250); pkt.remove(); return;
     }
 
-    pkt.remove(); diagram.frames.push({seq, delivered:true});
+    pkt.remove(); 
+    if (!diagram.frames.some(f => f.seq === seq)) {
+ 	 diagram.frames.push({ seq, delivered: !lose });
+          }
+
     await sleep(PROC_MS);
     await receiverHandle(seq, geom);
   }
@@ -453,7 +471,7 @@
       stats.framesDelivered++; ackNum = seq;
       log(`Receiver accepted ${seq} → ACK ${ackNum}`);
     } else {
-      ackNum = expected - 1; // may be -1 at start
+      ackNum = Math.max(0, expected - 1);
       log(`Receiver discarded ${seq} (expected ${expected}) → ACK ${ackNum}`);
     }
 
@@ -480,7 +498,7 @@
 
   function onAck(ackNum){
     log(`Sender received cumulative ACK ${ackNum}.`);
-    if(ackNum >= base){
+    if (ackNum >= base && ackNum < nextSeq){
       base = ackNum + 1;
       refreshWindow();
       if(base === nextSeq) clearTimer(); else startTimer();
@@ -644,6 +662,7 @@
   // --------- Controls ---------
   startBtn.addEventListener("click", async ()=>{
     if(running) return;
+    init( );     
     running=true; paused=false;
     log(`Started — mode: ${simModeEl.value}`);
     await pumpWindow();
