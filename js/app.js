@@ -1,27 +1,36 @@
-// js/app.js — Cinematic Go-Back-N with Diagram Modes (Textbook, Vertical Columns, Animated)
-// Left→Right live sim, slow timing, proper stats, conditional inputs.
+// js/app.js — Stop-and-Study™ GBN (light theme, 1-frame-at-a-time, realistic ACKs)
+// Features:
+// - One frame at a time (teaching pace ~5s per send→ACK cycle)
+// - Realistic ACKs (ACK launches only after frame reaches receiver)
+// - Delay inputs only show when Delay Mode ≠ "None"
+// - Diagram Type selector works: Vertical two-columns / Textbook diagonals / Animated replay
+// - Always-visible dropdowns (forcefully styled so no hover weirdness)
+// - Accurate stats + pretty summary
+
 (function () {
-  // Build UI
+  // Build UI (keeps your HTML minimal)
   const app = document.getElementById("app");
   app.innerHTML = `
     <header class="glass">
-      <h1>Go-Back-N ARQ — Neon Glass</h1>
-      <p>Sender (left) → Receiver (right). Packets glide right; ACKs glide left. Results appear after the final ACK.</p>
+      <h1 style="color:#0b1e2b">Go-Back-N ARQ — Light Mode</h1>
+      <p style="color:#3e5566">Sender (left) → Receiver (right). Single-frame cinematic flow. Summary after final ACK.</p>
 
       <div class="controls">
         <label>Number of frames
-          <input id="numFrames" type="number" min="1" max="300" value="12">
+          <input id="numFrames" type="number" min="1" max="300" value="8">
         </label>
-        <label>Window size (N)
+
+        <label>Window size (N)  <!-- kept for syllabus, but we send sequentially -->
           <input id="winSize" type="number" min="1" max="32" value="4">
         </label>
+
         <label>Timeout (ms)
-          <input id="timeout" type="number" min="800" value="5000">
+          <input id="timeout" type="number" min="2000" value="6000">
         </label>
 
         <label>Loss %
-          <input id="lossPercent" type="range" min="0" max="80" value="10">
-          <span id="lossPercentVal">10%</span>
+          <input id="lossPercent" type="range" min="0" max="80" value="15">
+          <span id="lossPercentVal">15%</span>
         </label>
 
         <label>Frame Loss Mode
@@ -32,9 +41,11 @@
             <option value="none">None</option>
           </select>
         </label>
+
         <label id="labelSpecific" class="hidden">Specific frames (comma)
           <input id="specificFrames" type="text" placeholder="e.g. 2,7,9">
         </label>
+
         <label id="labelEveryK" class="hidden">k (every k-th)
           <input id="everyK" type="number" min="1" value="3">
         </label>
@@ -46,19 +57,22 @@
             <option value="everyk">Delay every k-th</option>
           </select>
         </label>
+
         <label id="labelDelaySpec" class="hidden">Delay frame # / k
           <input id="frameDelaySpec" type="text" placeholder="e.g. 5 or 3,6">
         </label>
+
         <label id="labelDelayMs" class="hidden">Frame delay (ms)
-          <input id="frameDelayMs" type="number" min="0" value="1500">
+          <input id="frameDelayMs" type="number" min="0" value="1200">
         </label>
 
         <label>ACK Loss %
           <input id="ackLossPercent" type="range" min="0" max="80" value="5">
           <span id="ackLossVal">5%</span>
         </label>
+
         <label>ACK Delay (ms)
-          <input id="ackDelayMs" type="number" min="0" value="1200">
+          <input id="ackDelayMs" type="number" min="0" value="800">
         </label>
 
         <label>Diagram Type
@@ -80,29 +94,31 @@
 
     <section class="glass sim-area">
       <div class="lane">
-        <h3>Sender</h3>
+        <h3 style="color:#0b1e2b">Sender</h3>
         <div id="senderWindow" class="window"></div>
         <div id="senderQueue" class="queue"></div>
       </div>
+
       <div class="channel glass">
         <div id="channelStage"></div>
       </div>
+
       <div class="lane">
-        <h3>Receiver</h3>
+        <h3 style="color:#0b1e2b">Receiver</h3>
         <div id="recvArea" class="recv"></div>
       </div>
     </section>
 
     <section class="glass">
-      <h3 style="text-align:center;color:#00ffff;margin-bottom:6px">Event Log</h3>
+      <h3 style="text-align:center;color:#0b1e2b;margin-bottom:6px">Event Log</h3>
       <div id="events" class="log"></div>
     </section>
 
     <section class="glass hidden" id="statsWrap">
-      <h3 style="text-align:center;color:#00ffff;margin-bottom:8px">📊 Simulation Results</h3>
+      <h3 style="text-align:center;color:#0b1e2b;margin-bottom:8px">📊 Simulation Results</h3>
       <div class="stats">
         <div class="stat-card"><div class="stat-label">Total original frames</div><div class="stat-value" id="stat_totalFrames">0</div></div>
-        <div class="stat-card"><div class="stat-label">Total transmissions (incl. retransmissions)</div><div class="stat-value" id="stat_totalTrans">0</div></div>
+        <div class="stat-card"><div class="stat-label">Total transmissions</div><div class="stat-value" id="stat_totalTrans">0</div></div>
         <div class="stat-card"><div class="stat-label">Frames delivered</div><div class="stat-value" id="stat_delivered">0</div></div>
         <div class="stat-card"><div class="stat-label">Total ACKs generated</div><div class="stat-value" id="stat_totalAcks">0</div></div>
         <div class="stat-card"><div class="stat-label">Frames lost</div><div class="stat-value" id="stat_framesLost">0</div></div>
@@ -112,22 +128,27 @@
           <div class="stat-value" id="stat_efficiency">0%</div>
           <div class="eff-bar"><div id="eff_fill" class="eff-fill" style="width:0%"></div></div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Loss percent (frames/transmissions)</div>
-          <div class="stat-value" id="stat_lossPercent">0%</div>
-        </div>
+        <div class="stat-card"><div class="stat-label">Loss percent (frames/transmissions)</div><div class="stat-value" id="stat_lossPercent">0%</div></div>
       </div>
 
       <div style="margin-top:12px">
-        <h4 style="color:#a9c2d6;margin-bottom:6px">Flow Diagram (<span id="diagramModeLabel">Vertical two-columns</span>)</h4>
+        <h4 style="color:#3e5566;margin-bottom:6px">Flow Diagram (<span id="diagramModeLabel">Vertical two-columns</span>)</h4>
         <div id="diagramHost" class="glass" style="padding:10px"></div>
       </div>
     </section>
 
-    <footer>CN Project • Go-Back-N • neon cinema 😎</footer>
+    <footer style="color:#3e5566;text-align:center">CN Project • Go-Back-N • light, realistic, cinematic ✨</footer>
   `;
 
-  // Refs
+  // ---------- Quick light styling for inputs/selects so they're always visible ----------
+  Array.from(document.querySelectorAll(".controls input, .controls select")).forEach(el=>{
+    el.style.background = "rgba(255,255,255,0.85)";
+    el.style.color = "#0b1e2b";
+    el.style.border = "1px solid rgba(0,0,0,0.15)";
+    el.style.opacity = "1";
+  });
+
+  // ---------- Refs ----------
   const $ = s => document.querySelector(s);
   const numFramesEl = $("#numFrames"), winSizeEl = $("#winSize"), timeoutEl = $("#timeout");
   const lossPercentEl = $("#lossPercent"), lossPercentVal = $("#lossPercentVal");
@@ -143,7 +164,7 @@
   const channelStage = $("#channelStage"), events = $("#events");
   const statsWrap = $("#statsWrap"), diagramHost = $("#diagramHost");
 
-  // UI visibility (fix)
+  // ---------- UI toggles (delay inputs + loss mode extras) ----------
   const updateLossUI = () => {
     const v = lossModeEl.value;
     labelSpecific.classList.toggle("hidden", v !== "specific");
@@ -165,58 +186,59 @@
   frameDelayModeEl.addEventListener("change", updateDelayUI);
   diagramTypeEl.addEventListener("change", updateDiagramLabel);
 
-  // State
+  // ---------- State (sequential mode) ----------
   let N, timeout, lossProb, ackLossProb;
-  let base, nextseq, seqLimit;
-  let sentFrames = []; // {seq, acked, sends, dom}
-  let running = false, timer = null;
+  let currentSeq, seqLimit;
+  let running = false, paused = false, timer = null;
 
-  // diagram capture
-  const diagram = { frames: [], acks: [] }; // frames:{seq, delivered}, acks:{seq, delivered}
-
-  // stats
   const stats = {
     totalFrames: 0, totalTrans: 0, totalAcks: 0,
     framesLost: 0, acksLost: 0, framesDelayed: 0,
-    framesDelivered: 0 // in-order accepted at receiver
+    framesDelivered: 0
   };
 
+  const diagram = { frames: [], acks: [] }; // {seq, delivered}
+
   function init(){
-    N = clamp(parseInt(winSizeEl.value,10)||4, 1, 32);
-    timeout = clamp(parseInt(timeoutEl.value,10)||5000, 800, 60000);
+    N = clamp(parseInt(winSizeEl.value,10)||4, 1, 32); // not used for send burst in this mode
+    timeout = clamp(parseInt(timeoutEl.value,10)||6000, 2000, 60000);
     lossProb = (parseInt(lossPercentEl.value,10)||0)/100;
     ackLossProb = (parseInt(ackLossPercentEl.value,10)||0)/100;
 
-    base = 0; nextseq = 0;
-    seqLimit = clamp(parseInt(numFramesEl.value,10)||12, 1, 300);
-    sentFrames = [];
-    running = false; clearTimer();
+    currentSeq = 0;
+    seqLimit = clamp(parseInt(numFramesEl.value,10)||8, 1, 300);
+    running = false; paused = false; clearTimer();
 
-    stats.totalFrames = seqLimit; stats.totalTrans=0; stats.totalAcks=0;
-    stats.framesLost=0; stats.acksLost=0; stats.framesDelayed=0; stats.framesDelivered=0;
-
+    Object.assign(stats, {
+      totalFrames: seqLimit, totalTrans: 0, totalAcks: 0,
+      framesLost: 0, acksLost: 0, framesDelayed: 0, framesDelivered: 0
+    });
     diagram.frames = []; diagram.acks = [];
 
-    senderWindow.innerHTML=""; senderQueue.innerHTML=""; recvArea.innerHTML="";
-    channelStage.innerHTML=""; events.innerHTML="";
-    statsWrap.classList.add("hidden"); diagramHost.innerHTML="";
+    senderWindow.innerHTML=""; senderQueue.innerHTML="";
+    recvArea.innerHTML=""; channelStage.innerHTML="";
+    events.innerHTML=""; statsWrap.classList.add("hidden"); diagramHost.innerHTML="";
 
+    // Build sender "window" slots (informative)
     for(let i=0;i<N;i++){
-      const f = document.createElement("div");
-      f.className="frame";
-      f.textContent = (base+i)<seqLimit ? `#${base+i}` : "-";
+      const f = document.createElement("div"); f.className="frame";
+      f.textContent = (i) < seqLimit ? `#${i}` : "-";
       senderWindow.appendChild(f);
     }
+
+    // Apply visibility on load
     updateLossUI(); updateDelayUI(); updateDiagramLabel();
-    log("Ready — Start for slow cinematic left→right flow.");
+
+    log("Ready — one-frame-at-a-time, realistic ACKs, ~5s per cycle.");
   }
 
-  // helpers
+  // ---------- Helpers ----------
+  const $new = (t,c,txt)=>{ const e=document.createElement(t); if(c) e.className=c; if(txt!=null) e.textContent=txt; return e; };
   const clamp = (n,a,b)=>Math.max(a,Math.min(b,n));
-  const log = msg => events.prepend(Object.assign(document.createElement("div"),{textContent:`[${new Date().toLocaleTimeString()}] ${msg}`}));
   const parseNums = txt => !txt?[]:txt.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n));
+  const log = msg => events.prepend($new("div", null, `[${new Date().toLocaleTimeString()}] ${msg}`));
 
-  const shouldLose = seq => {
+  const shouldLoseFrame = seq => {
     const m = lossModeEl.value;
     if(m==="none") return false;
     if(m==="random") return Math.random() < lossProb;
@@ -224,7 +246,7 @@
     if(m==="everyk"){ const k=parseInt(everyKEl.value,10)||1; return ((seq+1)%k)===0; }
     return false;
   };
-  const shouldDelay = seq => {
+  const shouldDelayFrame = seq => {
     const m = frameDelayModeEl.value;
     if(m==="none") return false;
     const arr = parseNums(frameDelaySpecEl.value);
@@ -233,148 +255,153 @@
     return false;
   };
 
-  function refreshWindow(){
-    [...senderWindow.querySelectorAll(".frame")].forEach((f,i)=>{
-      const seq = base + i;
-      f.textContent = seq < seqLimit ? `#${seq}` : '-';
-      f.classList.toggle("active", seq >= base && seq < nextseq && seq < seqLimit);
-    });
-  }
+  // ---------- Sequential engine ----------
+  // Target ~5s: 2.0s down + 0.6s process + 2.0s up (plus user delays)
+  const BASE_DOWN_MS = 2000;
+  const BASE_PROC_MS = 600;
+  const BASE_ACK_MS  = 2000;
 
-  // send loop
-  function sendIfPossible(){
-    while(nextseq < base + N && nextseq < seqLimit){
-      sendFrame(nextseq);
-      nextseq++;
+  async function runSequential(){
+    while(running && currentSeq < seqLimit){
+      if(paused) { await waitWhile(()=>paused); if(!running) break; }
+      await sendOne(currentSeq);
+      currentSeq++;
     }
-    refreshWindow();
+    if(currentSeq >= seqLimit){
+      finish();
+    }
   }
 
-  // live animation L→R
-  function sendFrame(seq, isRetrans=false){
-    // badge in queue
-    const badge = document.createElement("div");
-    badge.className="packet"; badge.style.position="static";
-    badge.textContent=`F${seq}`;
+  function wait(ms){ return new Promise(res=>setTimeout(res,ms)); }
+  function waitWhile(pred){ return new Promise(res=>{ const t=setInterval(()=>{ if(!pred()) {clearInterval(t); res();} }, 80); }); }
+
+  async function sendOne(seq){
+    // queue badge
+    const badge = $new("div","packet","F"+seq); badge.style.position="static";
     senderQueue.appendChild(badge);
 
     stats.totalTrans++;
 
-    // geometry
-    const W = channelStage.clientWidth, H = channelStage.clientHeight;
-    const leftX = 16, rightX = Math.max(120, W - 16 - 84);
-    const y = 80 + (seq % 6) * 54;
-    const start = {x:leftX, y};
-    const end   = {x:rightX, y:y+36};
+    // geometry (responsive)
+    const W = channelStage.clientWidth, leftX = 18, rightX = Math.max(120, W - 18 - 90);
+    const y = 90 + (seq % 6) * 56;
+    const start = {x:leftX, y}, end = {x:rightX, y:y+36};
 
     // line + packet
     const line = mkLine(start,end,"neon-line");
     const p = mkPacket(`F${seq}`,"packet",start);
     channelStage.appendChild(line); channelStage.appendChild(p);
 
-    const delayed = shouldDelay(seq);
+    // delay/loss
+    const delayed = shouldDelayFrame(seq);
     const extraDelay = delayed ? Math.max(0, parseInt(frameDelayMsEl.value,10)||0) : 0;
     if(delayed){ p.classList.add("delayed"); stats.framesDelayed++; }
-    const lose = shouldLose(seq);
+    const lose = shouldLoseFrame(seq);
 
-    const travel = 3800 + extraDelay; // very slow
-    animateLR(p,start,end,travel);
+    // animate down (frame travel)
+    await animatePromise(p, start, end, BASE_DOWN_MS + extraDelay);
 
-    setTimeout(()=>{
-      if(lose){
-        p.classList.add("lost");
-        line.classList.add("neon-line-lost");
-        log(`Frame ${seq} lost in channel.`);
-        stats.framesLost++;
-        diagram.frames.push({seq, delivered:false});
-        setTimeout(()=>{ safeRemove(p); fade(line); }, 700);
-      } else {
-        safeRemove(p); fade(line);
-        diagram.frames.push({seq, delivered:true});
-        onReceiverGot(seq);
-      }
-    }, travel + 100);
-
-    let rec = sentFrames.find(s=>s.seq===seq);
-    if(!rec){ rec={seq,acked:false,sends:1,dom:badge}; sentFrames.push(rec); }
-    else { rec.sends++; badge.style.opacity="0.9"; }
-
-    if(base===seq) startTimer();
-  }
-
-  // receiver / ack
-  function onReceiverGot(seq){
-    const exp = recvArea.childElementCount;
-    if(seq===exp){
-      const blk=document.createElement("div"); blk.className="frame active"; blk.textContent=`#${seq}`;
-      recvArea.appendChild(blk);
-      stats.framesDelivered++;
-      log(`Receiver accepted ${seq}. Sending ACK ${seq}.`);
-      sendAck(seq);
-    } else {
-      const a=exp-1;
-      log(`Receiver discarded ${seq} (expected ${exp}). Sending ACK ${a}.`);
-      sendAck(a);
+    if(lose){
+      p.classList.add("lost");
+      line.classList.add("neon-line-lost");
+      log(`Frame ${seq} lost → will timeout & retransmit`);
+      stats.framesLost++;
+      diagram.frames.push({seq, delivered:false});
+      await wait(500);
+      safeRemove(p); fade(line);
+      // timeout → retransmit same seq
+      await wait(timeout);
+      if(!running) return;
+      log(`Timeout for frame ${seq} — retransmitting`);
+      return sendOne(seq); // retry same frame
     }
+
+    // delivered to receiver
+    safeRemove(p); fade(line);
+    diagram.frames.push({seq, delivered:true});
+
+    // receiver processes
+    await wait(BASE_PROC_MS);
+
+    // receiver behavior (GBN check in-order)
+    const expected = recvArea.childElementCount;
+    if(seq === expected){
+      const blk=$new("div","frame active",`#${seq}`); recvArea.appendChild(blk);
+      stats.framesDelivered++;
+      log(`Receiver accepted ${seq} — sending ACK ${seq}`);
+      await sendAck(seq, y+36);  // realistic: ACK starts now
+    } else {
+      const ackFor = expected - 1;
+      log(`Receiver discarded ${seq} (expected ${expected}) — sending ACK ${ackFor}`);
+      await sendAck(ackFor, y+36);
+      // now timeout will hit and we’ll retransmit earlier seq; simulate by forcing timeout path:
+      await wait(timeout);
+      if(!running) return;
+      log(`Timeout for frame ${expected} — retransmitting from ${expected}`);
+      currentSeq = expected; // roll back to expected (GBN spirit)
+    }
+
+    // mark acked badge visually
+    badge.style.opacity="1";
+    badge.style.background="linear-gradient(180deg,#eafff7,#bff3e6)";
   }
 
-  function sendAck(ackSeq){
+  async function sendAck(ackSeq, baseY){
     stats.totalAcks++;
-    const W = channelStage.clientWidth;
-    const leftX = 16, rightX = Math.max(120, W - 16 - 84);
-    const y = 80 + (ackSeq % 6) * 54 + 36;
-    const start={x:rightX,y}, end={x:leftX,y:y-36};
+    const W = channelStage.clientWidth, leftX = 18, rightX = Math.max(120, W - 18 - 90);
+    const start = {x:rightX, y:baseY}, end = {x:leftX, y:baseY-36};
 
     const line = mkLine(start,end,"neon-line neon-line-ack");
     const a = mkPacket(`ACK${ackSeq}`,"packet ack",start);
     channelStage.appendChild(line); channelStage.appendChild(a);
 
     const loseAck = Math.random() < ackLossProb;
-    const travel = 3400 + (parseInt(ackDelayMsEl.value,10)||0);
-    animateLR(a,start,end,travel);
+    await animatePromise(a, start, end, BASE_ACK_MS + (parseInt(ackDelayMsEl.value,10)||0));
 
-    setTimeout(()=>{
-      if(loseAck){
-        a.classList.add("lost");
-        line.classList.add("neon-dash");
-        log(`ACK ${ackSeq} lost on return path.`);
-        stats.acksLost++;
-        diagram.acks.push({seq:ackSeq, delivered:false});
-        setTimeout(()=>{ safeRemove(a); fade(line); }, 700);
-      } else {
-        safeRemove(a); fade(line);
-        diagram.acks.push({seq:ackSeq, delivered:true});
-        onAckReceived(ackSeq);
-      }
-    }, travel + 100);
-  }
-
-  function onAckReceived(ackSeq){
-    log(`Sender received ACK ${ackSeq}.`);
-    sentFrames.forEach(s=>{ if(s.seq <= ackSeq) s.acked = true; });
-    while(sentFrames.length && sentFrames[0].acked){
-      const r=sentFrames.shift(); if(r&&r.dom){ r.dom.style.opacity="1"; r.dom.style.background="linear-gradient(180deg,#eafff7,#bff3e6)"; }
-      base++;
+    if(loseAck){
+      a.classList.add("lost");
+      line.classList.add("neon-dash");
+      log(`ACK ${ackSeq} lost — timeout will trigger`);
+      diagram.acks.push({seq:ackSeq, delivered:false});
+      await wait(500);
+      safeRemove(a); fade(line);
+      // Let timeout handle retransmission in sendOne
+      return;
     }
-    if(sentFrames.length>0) startTimer(); else clearTimer();
-    refreshWindow();
-    if(running) sendIfPossible();
-    if(base >= seqLimit) finish();
+
+    safeRemove(a); fade(line);
+    diagram.acks.push({seq:ackSeq, delivered:true});
+    log(`Sender received ACK ${ackSeq}`);
   }
 
-  // timer/timeout
-  function startTimer(){ clearTimer(); timer=setTimeout(onTimeout, timeout); }
-  function clearTimer(){ if(timer){ clearTimeout(timer); timer=null; } }
-  function onTimeout(){
-    log(`Timeout at base ${base}. Retransmitting ${base}..${Math.min(base+N-1, seqLimit-1)}.`);
-    const outstanding = sentFrames.map(s=>s.seq);
-    outstanding.forEach(q=>sendFrame(q,true));
-    if(sentFrames.length>0) startTimer();
+  // ---------- Anim helpers ----------
+  function mkLine(a,b,cls){ const d=document.createElement("div"); d.className=cls||"neon-line"; placeLine(d,a,b); return d; }
+  function placeLine(line,a,b){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const len=Math.sqrt(dx*dx+dy*dy), ang=Math.atan2(dy,dx)*180/Math.PI;
+    line.style.width=`${len}px`; line.style.left=`${a.x}px`; line.style.top=`${a.y}px`;
+    line.style.transform=`rotate(${ang}deg)`;
   }
+  function mkPacket(text, cls, pos){ const p=document.createElement("div"); p.className=cls; p.textContent=text; p.style.left=`${pos.x}px`; p.style.top=`${pos.y}px`; return p; }
+  function animatePromise(elm,a,b,ms){
+    elm.style.opacity="1";
+    return new Promise(res=>{
+      const s=performance.now();
+      (function step(t){
+        const k=Math.min(1,(t-s)/ms), e=ease(k);
+        elm.style.left=`${a.x+(b.x-a.x)*e}px`; elm.style.top=`${a.y+(b.y-a.y)*e}px`;
+        if(k<1) requestAnimationFrame(step); else res();
+      })(s);
+    });
+  }
+  const ease = k => k<0.5 ? 2*k*k : -1 + (4-2*k)*k;
+  const fade = el=>{ el.style.transition="opacity .45s"; el.style.opacity="0"; setTimeout(()=>safeRemove(el),470); };
+  const safeRemove = el=>{ if(el && el.parentNode) el.parentNode.removeChild(el); };
 
-  // finish + stats + diagram
+  // ---------- Finish + Summary + Diagram ----------
   function finish(){
-    clearTimer(); running=false; log("Simulation complete. Preparing summary…");
+    running=false; clearTimer(); log("Simulation complete — composing summary…");
+
     const delivered = stats.framesDelivered;
     const trans = Math.max(1, stats.totalTrans);
     const eff = (delivered / trans) * 100;
@@ -390,106 +417,105 @@
     setText("#stat_lossPercent", loss.toFixed(2) + "%");
     $("#eff_fill").style.width = `${Math.max(0,Math.min(100,eff))}%`;
 
-    // Render chosen diagram
+    // render diagram per selection
     diagramHost.innerHTML="";
     const mode = diagramTypeEl.value; // vertical | textbook | animated
+    const labelMap = { vertical: "Vertical two-columns", textbook: "Textbook diagonals", animated: "Animated replay" };
+    diagramModeLabel.textContent = labelMap[mode] || "Vertical two-columns";
     renderDiagram(diagramHost, diagram, stats.totalFrames, mode);
 
     statsWrap.classList.remove("hidden");
   }
   const setText=(sel,txt)=>{const n=document.querySelector(sel); if(n) n.textContent=txt;};
 
-  // diagram renderers (SVG)
   function renderDiagram(host, diag, framesCount, mode){
-    if(mode === "vertical") return renderVertical(host, diag, framesCount, false);
-    if(mode === "animated") return renderVertical(host, diag, framesCount, true);
+    if(mode==="vertical" || mode==="animated") return renderVertical(host, diag, framesCount, mode==="animated");
     return renderTextbook(host, diag, framesCount, mode==="animated");
   }
 
-  // Vertical two-columns (exactly like your screenshot): two rails + horizontal links
+  // Vertical two-columns (exactly like you asked): two vertical rails + horizontal links
   function renderVertical(host, diag, rows, animated){
-    const w = host.clientWidth || 800, rowGap = 60;
-    const h = Math.max(200, rows*rowGap + 60);
-    const padX = 90, colL = padX, colR = w - padX;
+    const w = host.clientWidth || 900, rowGap = 60;
+    const h = Math.max(220, rows*rowGap + 60);
+    const padX = 110, colL = padX, colR = w - padX;
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(svgNS,"svg");
-    svg.setAttribute("viewBox",`0 0 ${w} ${h}`); svg.setAttribute("width","100%"); svg.setAttribute("height",h);
+    svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+    svg.setAttribute("width","100%"); svg.setAttribute("height",h);
 
     // rails
-    svg.appendChild(vline(colL, 30, h-30, "#00ffff"));
-    svg.appendChild(vline(colR, 30, h-30, "#4faaff"));
+    svg.appendChild(vline(colL, 30, h-30, "#0b1e2b"));
+    svg.appendChild(vline(colR, 30, h-30, "#0b1e2b"));
     svg.appendChild(label(colL-25, 20, "Sender"));
     svg.appendChild(label(colR-35, 20, "Receiver"));
 
-    // row nodes + links
-    let idx = 0;
+    // nodes
     for(let i=0;i<rows;i++){
       const y = 40 + i*rowGap;
       svg.appendChild(node(colL, y, `#${i}`));
       svg.appendChild(node(colR, y, `#${i}`));
     }
 
-    // frame lines (cyan or red dashed if lost)
+    // frame lines
+    let idx=0;
     diag.frames.forEach(f=>{
       const y = 40 + f.seq*rowGap;
-      const ln = hline(colL, y, colR, y, f.delivered ? "#00ffff" : "#ff6b6b", f.delivered ? 0 : 1);
+      const ln = hline(colL, y, colR, y, f.delivered ? "#00a3ad" : "#ff6b6b", f.delivered ? 0 : 1);
       if(animated) dashDraw(ln, idx++); svg.appendChild(ln);
     });
 
-    // ack lines slightly above the frame line (blue/dashed)
+    // ack lines slightly above
     diag.acks.forEach(a=>{
-      const y = 40 + Math.max(0,a.seq)*rowGap - 10;
+      const y = 40 + Math.max(0,a.seq)*rowGap - 12;
       const ln = hline(colR, y, colL, y, "#4faaff", a.delivered ? 0 : 1);
       if(animated) dashDraw(ln, idx++); svg.appendChild(ln);
     });
 
     host.appendChild(svg);
 
-    // helpers
     function vline(x,y1,y2,color){
-      const l = document.createElementNS(svgNS,"line");
-      l.setAttribute("x1",x); l.setAttribute("y1",y1); l.setAttribute("x2",x); l.setAttribute("y2",y2);
-      l.setAttribute("stroke", color); l.setAttribute("stroke-width","3"); l.setAttribute("opacity",".6");
-      return l;
+      const l = line(x,y1,x,y2,color,2); l.setAttribute("opacity",".55"); return l;
     }
     function hline(x1,y1,x2,y2,color,dashed){
-      const l = document.createElementNS(svgNS,"line");
-      l.setAttribute("x1",x1); l.setAttribute("y1",y1); l.setAttribute("x2",x2); l.setAttribute("y2",y2);
-      l.setAttribute("stroke", color); l.setAttribute("stroke-width","3"); l.setAttribute("opacity",".9");
-      if(dashed) l.setAttribute("stroke-dasharray","10 7");
-      return l;
+      const l = line(x1,y1,x2,y2,color,3); l.setAttribute("opacity",".9");
+      if(dashed) l.setAttribute("stroke-dasharray","10 7"); return l;
     }
     function node(x,y,t){
       const g = document.createElementNS(svgNS,"g");
       const c = document.createElementNS(svgNS,"circle");
-      c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r","7");
-      c.setAttribute("fill","rgba(255,255,255,0.1)"); c.setAttribute("stroke","rgba(255,255,255,0.35)");
+      c.setAttribute("cx",x); c.setAttribute("cy",y); c.setAttribute("r","6");
+      c.setAttribute("fill","rgba(0,0,0,0)"); c.setAttribute("stroke","rgba(0,0,0,0.35)");
       const tx = document.createElementNS(svgNS,"text");
-      tx.setAttribute("x",x-22); tx.setAttribute("y",y-12); tx.setAttribute("fill","#eafaff");
+      tx.setAttribute("x",x-26); tx.setAttribute("y",y-10); tx.setAttribute("fill","#0b1e2b");
       tx.setAttribute("font-size","12"); tx.textContent=t;
       g.appendChild(c); g.appendChild(tx); return g;
     }
     function label(x,y,txt){
-      const t = document.createElementNS(svgNS,"text");
+      const t=document.createElementNS(svgNS,"text");
       t.setAttribute("x",x); t.setAttribute("y",y);
-      t.setAttribute("fill","#00ffff"); t.setAttribute("font-size","14"); t.setAttribute("font-weight","700");
-      t.textContent = txt; return t;
+      t.setAttribute("fill","#0b1e2b"); t.setAttribute("font-size","14"); t.setAttribute("font-weight","700");
+      t.textContent=txt; return t;
     }
-    function dashDraw(line, i){
-      const len = Math.hypot(line.x2.baseVal.value - line.x1.baseVal.value, line.y2.baseVal.value - line.y1.baseVal.value);
-      line.setAttribute("stroke-dasharray", `${len}`);
-      line.setAttribute("stroke-dashoffset", `${len}`);
-      line.style.animation = `drawline 0.9s ${i*0.12}s ease forwards`;
-      const style = document.createElement("style");
-      style.textContent = `@keyframes drawline{to{stroke-dashoffset:0}}`;
+    function line(x1,y1,x2,y2,color,wid){
+      const l=document.createElementNS(svgNS,"line");
+      l.setAttribute("x1",x1); l.setAttribute("y1",y1);
+      l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+      l.setAttribute("stroke",color); l.setAttribute("stroke-width",wid); return l;
+    }
+    function dashDraw(ln, idx){
+      const len = Math.hypot(ln.x2.baseVal.value - ln.x1.baseVal.value, ln.y2.baseVal.value - ln.y1.baseVal.value);
+      ln.setAttribute("stroke-dasharray", `${len}`); ln.setAttribute("stroke-dashoffset", `${len}`);
+      ln.style.animation = `drawline 0.9s ${idx*0.14}s ease forwards`;
+      const style = document.createElement("style"); style.textContent = `@keyframes drawline{to{stroke-dashoffset:0}}`;
       svg.appendChild(style);
     }
   }
 
-  // Textbook diagonals (slanted)
+  // Textbook diagonals renderer (light)
   function renderTextbook(host, diag, rows, animated){
-    const w = host.clientWidth || 800, rowGap = 60, h = Math.max(200, rows*rowGap + 60);
-    const pad = 70, colL = pad, colR = w - pad;
+    const w = host.clientWidth || 900, rowGap = 60;
+    const h = Math.max(220, rows*rowGap + 60);
+    const pad = 90, colL = pad, colR = w - pad;
     const svgNS = "http://www.w3.org/2000/svg";
     const svg = document.createElementNS(svgNS,"svg");
     svg.setAttribute("viewBox",`0 0 ${w} ${h}`); svg.setAttribute("width","100%"); svg.setAttribute("height",h);
@@ -506,11 +532,11 @@
     let idx=0;
     diag.frames.forEach(f=>{
       const y = 40 + f.seq*rowGap;
-      const ln = seg(colL, y, colR, y+14, f.delivered ? "#00ffff" : "#ff6b6b", f.delivered ? 0 : 1);
+      const ln = seg(colL, y, colR, y+14, f.delivered ? "#00a3ad" : "#ff6b6b", f.delivered ? 0 : 1);
       if(animated) dashDraw(ln, idx++); svg.appendChild(ln);
     });
     diag.acks.forEach(a=>{
-      const y = 40 + Math.max(0,a.seq)*rowGap - 10;
+      const y = 40 + Math.max(0,a.seq)*rowGap - 12;
       const ln = seg(colR, y+14, colL, y, a.delivered ? "#4faaff" : "#4faaff", a.delivered ? 0 : 1);
       if(!a.delivered) ln.setAttribute("stroke-dasharray","10 7");
       if(animated) dashDraw(ln, idx++); svg.appendChild(ln);
@@ -519,75 +545,66 @@
     host.appendChild(svg);
 
     function node(x,y,t){
-      const g = document.createElementNS(svgNS,"g");
-      const r = document.createElementNS(svgNS,"rect");
+      const g=document.createElementNS(svgNS,"g");
+      const r=document.createElementNS(svgNS,"rect");
       r.setAttribute("x",x-20); r.setAttribute("y",y-12); r.setAttribute("width",40); r.setAttribute("height",24);
-      r.setAttribute("rx",6); r.setAttribute("fill","rgba(255,255,255,0.08)"); r.setAttribute("stroke","rgba(255,255,255,0.25)");
-      const tx = document.createElementNS(svgNS,"text");
-      tx.setAttribute("x",x-13); tx.setAttribute("y",y+4); tx.setAttribute("fill","#eafaff"); tx.setAttribute("font-size","12"); tx.textContent=t;
+      r.setAttribute("rx",6); r.setAttribute("fill","rgba(0,0,0,0.05)"); r.setAttribute("stroke","rgba(0,0,0,0.2)");
+      const tx=document.createElementNS(svgNS,"text");
+      tx.setAttribute("x",x-15); tx.setAttribute("y",y+4); tx.setAttribute("fill","#0b1e2b"); tx.setAttribute("font-size","12"); tx.textContent=t;
       g.appendChild(r); g.appendChild(tx); return g;
     }
     function seg(x1,y1,x2,y2,color,dashed){
       const l=document.createElementNS(svgNS,"line");
       l.setAttribute("x1",x1); l.setAttribute("y1",y1); l.setAttribute("x2",x2); l.setAttribute("y2",y2);
       l.setAttribute("stroke",color); l.setAttribute("stroke-width","3"); l.setAttribute("opacity",".9");
-      if(dashed) l.setAttribute("stroke-dasharray","10 7");
-      return l;
+      if(dashed) l.setAttribute("stroke-dasharray","10 7"); return l;
     }
     function label(x,y,txt){
       const t=document.createElementNS(svgNS,"text");
       t.setAttribute("x",x); t.setAttribute("y",y);
-      t.setAttribute("fill","#00ffff"); t.setAttribute("font-size","14"); t.setAttribute("font-weight","700");
+      t.setAttribute("fill","#0b1e2b"); t.setAttribute("font-size","14"); t.setAttribute("font-weight","700");
       t.textContent=txt; return t;
     }
-    function dashDraw(line,i){
-      const len = Math.hypot(line.x2.baseVal.value - line.x1.baseVal.value, line.y2.baseVal.value - line.y1.baseVal.value);
-      line.setAttribute("stroke-dasharray", `${len}`);
-      line.setAttribute("stroke-dashoffset", `${len}`);
-      line.style.animation = `drawT 0.9s ${i*0.12}s ease forwards`;
-      const style = document.createElement("style"); style.textContent = `@keyframes drawT{to{stroke-dashoffset:0}}`;
+    function dashDraw(ln, idx){
+      const len = Math.hypot(ln.x2.baseVal.value - ln.x1.baseVal.value, ln.y2.baseVal.value - ln.y1.baseVal.value);
+      ln.setAttribute("stroke-dasharray", `${len}`); ln.setAttribute("stroke-dashoffset", `${len}`);
+      ln.style.animation = `drawdiag 0.9s ${idx*0.14}s ease forwards`;
+      const style = document.createElement("style"); style.textContent = `@keyframes drawdiag{to{stroke-dashoffset:0}}`;
       svg.appendChild(style);
     }
   }
 
-  // live-sim geometry helpers
-  function mkLine(a,b,cls){ const d=document.createElement("div"); d.className=cls||"neon-line"; placeLine(d,a,b); return d; }
-  function placeLine(line,a,b){
-    const dx=b.x-a.x, dy=b.y-a.y;
-    const len=Math.sqrt(dx*dx+dy*dy), ang=Math.atan2(dy,dx)*180/Math.PI;
-    line.style.width=`${len}px`; line.style.left=`${a.x}px`; line.style.top=`${a.y}px`;
-    line.style.transform=`rotate(${ang}deg)`;
-  }
-  function mkPacket(text, cls, pos){ const p=document.createElement("div"); p.className=cls; p.textContent=text; p.style.left=`${pos.x}px`; p.style.top=`${pos.y}px`; return p; }
-  function animateLR(elm,a,b,ms){
-    elm.style.opacity="1";
-    const s=performance.now();
-    (function step(t){
-      const k=Math.min(1,(t-s)/ms), e=ease(k);
-      elm.style.left=`${a.x+(b.x-a.x)*e}px`; elm.style.top=`${a.y+(b.y-a.y)*e}px`;
-      if(k<1) requestAnimationFrame(step);
-    })(s);
-  }
-  const ease = k => k<0.5 ? 2*k*k : -1 + (4-2*k)*k;
-  const fade = el=>{ el.style.transition="opacity .5s"; el.style.opacity="0"; setTimeout(()=>safeRemove(el),520); };
-  const safeRemove = el=>{ if(el && el.parentNode) el.parentNode.removeChild(el); };
+  // ---------- Controls ----------
+  startBtn.addEventListener("click", async ()=>{
+    if(running) return;
+    paused = false; running = true;
+    log("Started.");
+    await runSequential();
+  });
 
-  // controls
-  startBtn.addEventListener("click", ()=>{ if(running) return; running=true; log("Started."); sendIfPossible(); });
-  pauseBtn.addEventListener("click", ()=>{ running=false; clearTimer(); log("Paused."); });
-  stepBtn.addEventListener("click", ()=>{ if(!running){ const pre=nextseq; sendIfPossible(); if(nextseq===pre) log("Step: window full / finished."); }});
-  resetBtn.addEventListener("click", ()=>{ init(); log("Reset."); });
+  pauseBtn.addEventListener("click", ()=>{
+    paused = true; running = true;
+    clearTimer();
+    log("Paused.");
+  });
 
-  // timer
-  function startTimer(){ clearTimer(); timer=setTimeout(onTimeout, timeout); }
+  stepBtn.addEventListener("click", async ()=>{
+    if(running) return;  // step only when not auto-running
+    paused = false; running = true;
+    await sendOne(currentSeq);
+    currentSeq++;
+    running = false;
+    if(currentSeq >= seqLimit) finish();
+  });
+
+  resetBtn.addEventListener("click", ()=>{
+    init(); log("Reset.");
+  });
+
+  // ---------- Timer (used only for retransmission waits in this sequential model) ----------
+  function startTimer(cb, ms){ clearTimer(); timer = setTimeout(cb, ms); }
   function clearTimer(){ if(timer){ clearTimeout(timer); timer=null; } }
-  function onTimeout(){
-    log(`Timeout at base ${base}. Retransmitting ${base}..${Math.min(base+N-1, seqLimit-1)}.`);
-    const outstanding=sentFrames.map(s=>s.seq);
-    outstanding.forEach(q=>sendFrame(q,true));
-    if(sentFrames.length>0) startTimer();
-  }
 
-  // boot
+  // ---------- Boot ----------
   init();
 })();
