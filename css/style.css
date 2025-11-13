@@ -140,3 +140,57 @@ select option {
 .dev-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:12px}
 .dev-name{font-weight:800}
 .steps{margin-left:18px}
+.modal-body h4 {
+  color: var(--accent);
+  margin-top: 10px;
+  margin-bottom: 6px;
+  text-shadow: 0 0 8px rgba(0,255,255,0.3);
+}
+
+.modal-body p {
+  line-height: 1.6;
+  color: #d9f4ff;
+}
+
+.bullets li, .steps li {
+  margin-bottom: 6px;
+  color: #bdefff;
+}
+
+/* --- Scrollable Modals --- */
+.modal-card {
+  max-height: 90vh;            /* viewport height cap */
+  overflow-y: auto;            /* vertical scroll if content is long */
+  scrollbar-width: thin;       /* modern browsers (Firefox) */
+  scrollbar-color: var(--accent) rgba(255,255,255,0.05);
+}
+
+/* for WebKit browsers (Chrome, Edge) */
+.modal-card::-webkit-scrollbar {
+  width: 8px;
+}
+.modal-card::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 4px;
+}
+.modal-card::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.05);
+}
+
+.modal-body {
+  overflow-y: auto;
+  max-height: 70vh;            /* ensures long content scrolls within modal */
+  padding-right: 8px;
+  line-height: 1.55;
+}
+
+/* smooth scroll and gentle fade look */
+.modal-card {
+  scroll-behavior: smooth;
+  animation: modalPop 0.3s ease-out;
+}
+
+@keyframes modalPop {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}

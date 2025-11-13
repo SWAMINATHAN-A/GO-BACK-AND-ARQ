@@ -194,30 +194,53 @@ ss
 
   <!-- MODALS -->
   <div class="modal hidden" id="modalLearn">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h3>Learn: Go-Back-N ARQ (Quick Primer)</h3>
-        <button class="icon-btn" data-close="modalLearn">✕</button>
-      </div>
-      <div class="modal-body">
-        <p><b>Idea:</b> Sender can have up to <i>N</i> unacknowledged frames “in flight”. If a timeout happens, it retransmits from the <i>base</i> (the oldest un-ACKed frame). Receiver sends <b>cumulative ACKs</b> (ACK k ⇒ received all ≤ k).</p>
-        <ul class="bullets">
-          <li><b>Window:</b> [base … nextSeq-1]</li>
-          <li><b>Timeout:</b> No ACK for base before timer ⇒ resend base..nextSeq-1</li>
-          <li><b>Loss/Delay:</b> We can inject losses and delays for frames and ACKs</li>
-        </ul>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>Learn: Go-Back-N ARQ — Visual Guide</h3>
+      <button class="icon-btn" data-close="modalLearn">✕</button>
+    </div>
+    <div class="modal-body">
+      <p><b>Concept:</b> Go-Back-N ARQ is a <b>sliding window protocol</b> that allows the sender to transmit multiple frames before needing an acknowledgment (ACK) — improving efficiency.</p>
 
-        <div class="video">
-          <!-- Replace with any educational ARQ video you prefer -->
-          <iframe width="560" height="315"
-            src="https://www.youtube.com/watch?v=QD3oCelHJ20"
-            title="Go-Back-N ARQ Explained Visually" frameborder="0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen></iframe>
-        </div>
+      <h4>🔹 How It Works</h4>
+      <ul class="bullets">
+        <li><b>Sender Window (N):</b> The sender can send up to <i>N</i> unacknowledged frames.</li>
+        <li><b>ACK Mechanism:</b> The receiver sends <b>cumulative ACKs</b> — e.g., ACK 4 means it has received frames 0-4 correctly.</li>
+        <li><b>Timeout:</b> If no ACK arrives for the oldest unacknowledged frame, the sender retransmits all frames from that frame onwards.</li>
+        <li><b>Loss Handling:</b> You can simulate losses or delays for both frames and ACKs to observe the protocol’s behavior.</li>
+      </ul>
+
+      <div class="glass-lite" style="padding:10px;margin:14px 0;">
+        <h4>📈 Real-World Example</h4>
+        <p>Imagine sending 10 data packets with a window size of 4.  
+        Frames 0–3 are sent. If frame 2 is lost, the receiver only ACKs up to 1.  
+        When timeout occurs, the sender retransmits from frame 2 → onward.</p>
+      </div>
+
+      
+      </div>
+
+      <h4>📹 Video Explanation</h4>
+      <div class="video">
+        <div class="video glass-lite" style="text-align:center; padding:10px;">
+  <a href="https://www.youtube.com/watch?v=QD3oCelHJ20" target="_blank" rel="noopener noreferrer">
+    <img src="https://img.youtube.com/vi/QD3oCelHJ20/0.jpg" 
+         alt="Go-Back-N ARQ Tutorial"
+         style="max-width:90%; border-radius:10px; border:1px solid rgba(255,255,255,0.15)">
+    <p style="margin-top:8px; color:#00ffff;">▶ Watch Go-Back-N ARQ Tutorial on YouTube</p>
+  </a>
+</div>
+
+
+      <div class="glass-lite" style="margin-top:14px;padding:10px;">
+        <h4>💡 Key Takeaway</h4>
+        <p>Go-Back-N is efficient but can waste bandwidth on retransmission when losses occur frequently.  
+        That’s why <b>Selective Repeat</b> ARQ is used when reliability and efficiency are both critical.</p>
       </div>
     </div>
   </div>
+</div>
+
 
   <div class="modal hidden" id="modalDev">
     <div class="modal-card">
@@ -247,22 +270,49 @@ ss
   </div>
 
   <div class="modal hidden" id="modalHelp">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h3>Help</h3>
-        <button class="icon-btn" data-close="modalHelp">✕</button>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>Help & Usage Guide</h3>
+      <button class="icon-btn" data-close="modalHelp">✕</button>
+    </div>
+    <div class="modal-body">
+      <p>This simulator lets you <b>visualize and control</b> how Go-Back-N ARQ behaves under different network conditions.</p>
+
+      <h4>⚙️ Controls Explained</h4>
+      <ul class="bullets">
+        <li><b>Number of Frames:</b> Total frames to be sent in this session.</li>
+        <li><b>Window Size (N):</b> How many frames can be sent before an ACK is required.</li>
+        <li><b>Timeout:</b> Duration before retransmission starts if ACKs are not received.</li>
+        <li><b>Frame Loss % / Mode:</b> Simulate random or specific frame drops.</li>
+        <li><b>Frame Delay:</b> Introduce delays to observe timing differences.</li>
+        <li><b>ACK Loss % / Mode:</b> Simulate lost acknowledgments.</li>
+        <li><b>ACK Delay:</b> Delay ACK responses for realism.</li>
+      </ul>
+
+      <h4>🪄 Simulation Steps</h4>
+      <ol class="steps">
+        <li>Set all desired parameters (window size, losses, delays, etc.).</li>
+        <li>Click <b>Start</b> to run automatically or <b>Step</b> to go frame-by-frame.</li>
+        <li>Watch the animation: frames go sender → receiver, ACKs come back.</li>
+        <li>If a frame is lost or delayed, notice how the sender handles it.</li>
+        <li>At the end, view <b>Event Log</b> and <b>Summary Diagram</b> for detailed results.</li>
+      </ol>
+
+      <div class="glass-lite" style="margin-top:10px;padding:10px;">
+        <h4>🧾 Tips</h4>
+        <ul class="bullets">
+          <li>Hover over controls for tooltips (coming soon).</li>
+          <li>Use <b>Step</b> mode to explain frame-by-frame behavior in class.</li>
+          <li>Download the full report with logs and summary diagram using <b>Download</b>.</li>
+        </ul>
       </div>
-      <div class="modal-body">
-        <ol class="steps">
-          <li>Pick <b>Number of frames</b>, <b>Window size</b>, and <b>Timeout</b>.</li>
-          <li>Optionally set <b>loss</b> and <b>delay</b> modes for frames and ACKs.</li>
-          <li>Press <b>Start</b>. Watch frames travel (down-right). ACKs travel back (up-left).</li>
-          <li>On timeout, the sender retransmits from <b>base</b> — you’ll see “RTX” lines.</li>
-          <li>Event Log explains each step. Results & diagram appear at the end.</li>
-        </ol>
+
+      <div style="text-align:center;margin-top:12px;">
+        <button class="btn primary" data-close="modalHelp">Got it!</button>
       </div>
     </div>
   </div>
+</div>
 
   <script src="js/app.js"></script>
 </body>
